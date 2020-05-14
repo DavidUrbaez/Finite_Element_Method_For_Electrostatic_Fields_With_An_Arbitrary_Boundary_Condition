@@ -1,0 +1,235 @@
+import matplotlib.pyplot as plt
+import matplotlib.tri as tri
+import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+import cv2
+
+
+class x_and_y:
+    def __init__(self, dl, xMax, yMax, xMin, yMin):
+        self.dl = dl
+        self.xMax, self.xMin = xMax, xMin
+        self.yMax, self.yMin = yMax, yMin
+        self.x1_ = np.arange(self.xMin, self.xMax + self.dl, self.dl)
+        self.y1_ = np.arange(self.yMin, self.yMax + self.dl, self.dl)
+        self.x = np.tile(self.x1_, len(self.y1_))  # se crean las posiciones en x de los triangulos
+        self.y = np.repeat(self.y1_, len(self.x1_))  # se crean las posiciones en y de los triangulos
+        self.xnot, self.ynot = [], []
+        self.is_repited = np.zeros((len(self.y1_), len(self.x1_)))
+
+    def clean_x_and_y(self, x_test, y_test, pre=4):
+        _x_, _y_ = [], []
+        # for x_, y_ in zip(self.x, self.y):
+
+        for j in range(0, len(self.y1_)):
+            for i in range(0, len(self.x1_)):
+                x_ = self.x[i + len(self.x1_) * j]
+                y_ = self.y[i + len(self.x1_) * j]
+
+                not_in_test = True
+                for xx, yy in zip(x_test, y_test):
+                    if round(xx, pre) == round(x_, pre) and round(yy, pre) == round(y_, pre):
+                        print('Punto Repetido en: x: ' + str(x_) + ', y:' + str(y_))
+                        not_in_test = False
+                        self.is_repited[j, i] = 1
+                        break
+                if not_in_test:
+                    _x_.append(x_)
+                    _y_.append(y_)
+                else:
+                    self.xnot.append(x_)
+                    self.ynot.append(y_)
+        self.x = np.array(_x_)
+        self.y = np.array(_y_)
+
+
+m1 = x_and_y(dl=0.1, xMax=2, yMax=2, xMin=0, yMin=0)
+m2 = x_and_y(dl=0.02, xMax=(2 / 3) * m1.xMax, yMax=1, xMin=(1 / 3) * m1.xMax, yMin=0)
+
+x1, y1 = m1.x, m1.y
+m2.clean_x_and_y(x1, y1)
+x2, y2 = m2.x, m2.y
+x = np.concatenate([x1, x2])
+y = np.concatenate([y1, y2])
+triang = tri.Triangulation(x, y)
+# plt.triplot(triang)
+
+# fig1, ax1 = plt.subplots()
+# for i, (xx, yy) in enumerate(zip(x, y)):
+#     plt.text(xx, yy, i + 1, dict(size=20))
+#
+# ax1.set_aspect('equal')
+# ax1.triplot(triang, 'bo-', lw=1)
+# ax1.set_title('Numeración de Nodos')
+# plt.show()
+
+# -------------------------
+# LOADING IMAGE
+# -------------------------
+img = cv2.imread('Lightning_rod_3.jpg', 0)
+
+resized1 = cv2.resize(img, (round(1 / 3 * len(m1.x1_)), round(1 / 2 * len(m1.y1_)) + 1))
+ret, thresh1 = cv2.threshold(resized1, 127, 255, cv2.THRESH_BINARY_INV)
+
+resized2 = cv2.resize(img, (len(m2.x1_), len(m2.y1_)))
+ret, thresh2 = cv2.threshold(resized2, 127, 255, cv2.THRESH_BINARY_INV)
+
+# ------------------------
+
+# NDP / VAL para la malla 1
+Vi = np.zeros((len(m1.y1_), len(m1.x1_)))
+Vi[0, :] = 1
+
+is_Condition = np.zeros((len(m1.y1_), len(m1.x1_)))
+is_Condition[0, :] = 1
+is_Condition[-1, :] = 1
+is_Condition[round(1 / 2 * len(m1.y1_)):, round(1 / 3 * len(m1.x1_)):round(2 / 3 * len(m1.x1_))] += thresh1 / 255
+
+VAL = []
+NDP = []
+for j in range(0, len(m1.y1_)):
+    for i in range(0, len(m1.x1_)):
+        if is_Condition[len(m1.y1_) - j - 1, i] == 1:
+            VAL.append(Vi[len(m1.y1_) - j - 1, i])
+            NDP.append(j * len(m1.x1_) + i + 1)
+# NDP / VAL para la malla 2
+
+Vi1 = np.zeros((len(m2.y1_), len(m2.x1_)))
+is_Condition1 = np.zeros((len(m2.y1_), len(m2.x1_)))
+is_Condition1[-1, :] = 1
+is_Condition1 += thresh2 / 255
+VAL1 = []
+NDP1 = []
+k = 0
+for j in range(0, len(m2.y1_)):
+    for i in range(0, len(m2.x1_)):
+        isnt_repited = True
+        if m2.is_repited[j, i] == 1:
+            isnt_repited = False
+            k = k + 1
+        if is_Condition1[len(m2.y1_) - j - 1, i] == 1 and isnt_repited:
+            VAL1.append(Vi1[len(m2.y1_) - j - 1, i])
+            NDP1.append(j * len(m2.x1_) + i + 1 - k)
+NDP1 = np.max(NDP) + NDP1
+
+NDP = np.concatenate([NDP, NDP1])
+VAL = np.concatenate([VAL, VAL1])
+
+# ----------------------------------------
+
+
+NE = len(triang.triangles)  # numero de elementos
+ND = len(x)  # numero de nodos
+NP = len(NDP)  # numero de nodos fijos
+NL = triang.triangles  # se definen trios de nodos(cada trio representa un triangulo)
+
+##############################################################
+#                                                            #
+#              INICIA EL MÉTODO NÚMERICO                     #
+#                                                            #
+##############################################################
+
+Ct = np.zeros((ND, ND))
+# se sacan Ce de cada elemento y se insertan a Ctotal
+for ii, elem in enumerate(NL):
+    Ce = np.zeros((3, 3))
+    x_elem = x[elem]
+    y_elem = y[elem]
+    Q = np.array([np.ones(len(x_elem)), x_elem, y_elem]).T
+    Qinv = np.linalg.inv(Q)
+    A = (1 / 2) * (
+            (x_elem[1] - x_elem[0]) * (y_elem[2] - y_elem[0]) - (x_elem[2] - x_elem[0]) * (y_elem[1] - y_elem[0]))
+    grad_alpha = Qinv[1:].T
+    for i in range(0, 3):
+        for j in range(0, 3):
+            Ce[i][j] = np.dot(grad_alpha[i], grad_alpha[j]) * A
+    Ct[np.ix_(elem, elem)] += Ce
+# Hasta acá se tienen las matrices Ce de cada elemento y Ct total
+
+# se procede a encontrar los nodos libres
+LF = list(set(range(1, ND + 1)) - set(NDP))  # Nodos libres (sin condicion de frontera)
+
+# se crean las matrices CFF Y CFP, para luego solucionar el sistema
+
+CFF = np.zeros((len(LF), len(LF)))
+CFP = np.zeros((len(LF), ND - len(LF)))
+for i, ii in enumerate(LF):
+    for j, jj in enumerate(LF):
+        CFF[i][j] = Ct[ii - 1][jj - 1]
+    for j, jj in enumerate(NDP):
+        CFP[i][j] = -Ct[ii - 1][jj - 1]
+F_phi = np.linalg.inv(CFF) @ CFP @ VAL  # este vector es el de los potenciales encontrados
+
+# ahora debemos juntar los potenciales de condición de frontera (VAL) con los encontrados (F_phi)
+
+# Se crea el vector Phi
+u, v = 0, 0
+Phi = []
+# se junta VALS con F_phi
+for j in range(0, ND):
+    try:
+        if NDP[u] == u + 1 + v:
+            Phi.append(VAL[u])
+            u += 1
+        else:
+            Phi.append(F_phi[v])
+            v += 1
+    except:
+        Phi.append(F_phi[v])
+        v += 1
+Phi = np.array(Phi)
+
+# # --------------------------------------------------------
+# # GRAFICAS
+# # -----------------------------------------------------
+#
+# # -----------------------------------------------------
+# # GRAFICA 1
+# # -----------------------------------------------------
+#
+fig = plt.figure()
+ax2 = fig.add_subplot(1, 1, 1, projection='3d')
+PLOT3 = ax2.plot_trisurf(x, y, Phi, triangles=triang.triangles, cmap='coolwarm', alpha=0.84, linewidth=0,
+                         antialiased=False)
+PLOT4 = ax2.tricontour(triang, Phi, cmap='coolwarm', linewidths=3)
+fig.colorbar(PLOT3, ax=ax2, label='Tensión \u03C6 [V]')
+ax2.set_title('Voltaje - Método de Elementos Finitos (FEM)')
+ax2.set_xlabel('X [m]')
+ax2.set_ylabel('Y [m]')
+ax2.set_zlabel('\u03C6 [V]')
+# # -----------------------------------------------------
+# # GRAFICA 2
+# # -----------------------------------------------------
+fig, ax = plt.subplots()
+ax.set_aspect('equal')
+
+ax.tricontour(triang, Phi, colors='black', linewidths=1, linestyles='dashed')
+ax.triplot(triang, 'k-', lw=0.1)
+tpc = ax.tripcolor(triang, Phi, cmap='coolwarm', shading='gouraud',alpha=0.97)
+fig.colorbar(tpc, label='Tensión  \u03C6 [V]')
+tci = tri.LinearTriInterpolator(triang, -Phi)
+(Ex, Ey) = tci.gradient(triang.x, triang.y)
+E_norm = np.sqrt(Ex ** 2 + Ey ** 2)
+
+ex = np.resize(Ex, (len(m1.y1_), len(m1.x1_)))
+ey = np.resize(Ey, (len(m1.y1_), len(m1.x1_)))
+
+# MASK = np.zeros((len(m1.y1_), len(m1.x1_)))
+# MASK[round(1 / 2 * len(m1.y1_)):, round(1 / 3 * len(m1.x1_)):round(2 / 3 * len(m1.x1_))] += thresh1 / 255
+#
+# for i in range(len(m1.x1_)):
+#     for j in range(len(m1.y1_)):
+#         if MASK[i, -j] == 1:
+#             try:
+#                 ex[-i, j-1] = np.nan
+#                 ey[-i, j-1] = np.nan
+#             except:
+#                 pass
+
+X_, Y_ = np.meshgrid(m1.x1_, m1.y1_)
+ax.streamplot(X_, Y_, ex, ey, color='k', linewidth=1, density=2)
+ax.set_xlabel('X [m]')
+ax.set_ylabel('Y [m]')
+
+o=np.mean(E_norm)
+print('Magnitud de E Promedio: '+str(o)+'[V/m]')
